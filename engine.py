@@ -14,6 +14,7 @@ import math
 import os
 import sys
 from typing import Iterable
+import pickle
 
 import torch
 import util.misc as utils
@@ -80,7 +81,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir):
+def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, save_path=None):
     model.eval()
     criterion.eval()
 
@@ -100,6 +101,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             output_dir=os.path.join(output_dir, "panoptic_eval"),
         )
 
+    infer_results = []
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -107,6 +109,22 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
         outputs = model(samples)
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
+
+        # cache the predictions
+        if save_path:
+            outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs' and k != 'enc_outputs'}
+            indices = criterion.matcher(outputs_without_aux, targets)
+            for i in range(len(targets)):
+                infer_results.append({
+                    "pred_boxes": outputs['pred_boxes'][i].detach().cpu().numpy(),
+                    "pred_logits": outputs['pred_logits'][i].detach().cpu().numpy(),
+                    "labels": targets[i]['labels'].detach().cpu().numpy(),
+                    "boxes": targets[i]['boxes'].detach().cpu().numpy(),
+                    "image_id": targets[i]['image_id'].item(),
+                    "orig_size": targets[i]['orig_size'].detach().cpu().numpy(),
+                    "match_indices_src": indices[i][0].detach().cpu().numpy(),
+                    "match_indices_tgt": indices[i][1].detach().cpu().numpy(),
+                })
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
@@ -137,6 +155,11 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 res_pano[i]["file_name"] = file_name
 
             panoptic_evaluator.update(res_pano)
+
+    # save results
+    if save_path:
+        with open(output_dir / save_path, 'wb') as f:
+            pickle.dump(infer_results, f)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

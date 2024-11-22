@@ -155,13 +155,21 @@ def make_coco_transforms(image_set):
 
 
 def build(image_set, args):
-    root = Path(args.coco_path)
+    root = Path(args.dataset_path)
     assert root.exists(), f'provided COCO path {root} does not exist'
-    mode = 'instances'
-    PATHS = {
-        "train": (root / "train2017", root / "annotations" / f'{mode}_train2017.json'),
-        "val": (root / "val2017", root / "annotations" / f'{mode}_val2017.json'),
-    }
+    if args.dataset_file in ['cityscapes', 'foggy_cityscapes']:
+        PATHS = {
+            "train": (root, root / "annotations" / f'instancesonly_filtered_gtFine_train.json'),
+            "val": (root, root / "annotations" / f'remapped_filtered_gtFine_val.json'),
+        }
+    elif args.dataset_file in ['coco']:
+        mode = 'instances'
+        PATHS = {
+            "train": (root / "train2017", root / "annotations" / f'{mode}_train2017.json'),
+            "val": (root / "val2017", root / "annotations" / f'{mode}_val2017.json'),
+        }
+    else:
+        raise NotImplementedError(f"{args.dataset_file} is not supported.")
 
     img_folder, ann_file = PATHS[image_set]
     dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set), return_masks=args.masks,
